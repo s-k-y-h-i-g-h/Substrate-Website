@@ -1,0 +1,96 @@
+---
+title: FreeLLMAPI — Local OpenAI-Compatible API Server
+description: Configuration, model registry, and tool calling for the FreeLLMAPI server.
+---
+
+# FreeLLMAPI
+
+FreeLLMAPI is the API layer in the Substrate local-LLM stack. It presents an OpenAI-compatible `/v1` endpoint backed by llama.cpp / vLLM, with a model registry, streaming, and tool calling.
+
+## Why FreeLLMAPI?
+
+| Feature | Why it matters |
+|---------|----------------|
+| Single-user | No auth complexity, no multi-tenant attack surface |
+| Model registry | Switch models via API (`POST /v1/models/load`) |
+| Tool calling | Native function calling for local models that support it |
+| Streaming | SSE streaming compatible with OpenAI SDKs |
+| Docker-native | One compose service, healthcheck, restart policy |
+
+## Compose snippet
+
+```yaml
+freellmapi:
+  image: ghcr.io/tashfeenahmed/freellmapi:latest
+  env_file: .env
+  environment:
+    NODE_ENV: production
+    PORT: 3001
+  ports:
+    - "127.0.0.1:3001:3001"  # localhost only; tunnel or Tailscale for remote
+  volumes:
+    - freellmapi-data:/app/server/data
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/health"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+```
+
+## Model registry
+
+Models are defined in `freellmapi-data/models.json`:
+
+```json
+{
+  "models": [
+    {
+      "id": "llama-3.1-8b-q4",
+      "name": "Llama 3.1 8B Q4_K_M",
+      "path": "/models/llama-3.1-8b-instruct-q4_k_m.gguf",
+      "context_length": 8192,
+      "parameters": {
+        "temperature": 0.7,
+        "top_p": 0.95
+      }
+    }
+  ]
+}
+```
+
+Load at runtime: `POST /v1/models/load {"model_id": "llama-3.1-8b-q4"}`.
+
+## Tool calling
+
+Models with tool support (Hermes, Nemotron, some Qwen) work out of the box:
+
+```bash
+curl -X POST http://127.0.0.1:3001/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama-3.1-8b-q4",
+    "messages": [{"role": "user", "content": "What is 247 * 83?"}],
+    "tools": [{"type": "function", "function": {"name": "calculate", "parameters": {"type": "object", "properties": {"expression": {"type": "string"}}}}]
+  }'
+```
+
+## Tunnel exposure
+
+The same named-tunnel pattern as Substrate-Website:
+
+```yaml
+# In cloudflared config.yml (on host)
+ingress:
+  - hostname: llm.substrate.win
+    service: http://host.docker.internal:3001
+  - service: http_status:404
+```
+
+Or keep it tailnet-private: `https://freellmapi.tail07e3cf.ts.net` via Tailscale serve.
+
+---
+
+*FreeLLMAPI is MIT-licensed. Source: [github.com/tashfeenahmed/FreeLLMAPI](https://github.com/tashfeenahmed/FreeLLMAPI)*

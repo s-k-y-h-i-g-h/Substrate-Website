@@ -1,0 +1,49 @@
+---
+title: Why Substrate Exists
+description: The motivation behind Substrate — evidence-graded, reproducible, self-hosted knowledge.
+---
+
+# Why Substrate Exists
+
+Most "documentation" in the self-hosted / biohacking / local-LLM space falls into one of three buckets:
+
+1. **Marketing copy** — vendor docs that only show the happy path
+2. **Outdated tutorials** — blog posts from 2021 that reference deprecated flags
+3. **Uncritical roundups** — "top 10 tools" lists with affiliate links and no evaluation criteria
+
+Substrate is none of those.
+
+## The principles
+
+| Principle | What it means |
+|-----------|---------------|
+| **No affiliate links** | No sponsored placements. No hidden incentives. If we recommend something, it's because it works. |
+| **Graded evidence** | Every claim cites its source. Every recommendation shows its confidence level (A/B/C/D). |
+| **Built to run** | Not "how to think about X" — actual compose files, configs, and validation steps you can execute. |
+| **Open source** | The site, the tooling, the data — all MIT/Apache-2.0. Fork it, audit it, improve it. |
+
+## What "evidence-graded" means
+
+```
+Grade A — Systematic review / RCT meta-analysis / replicated independent verification
+Grade B — Single RCT / high-quality cohort / direct reproduction by us
+Grade C — Mechanistic plausibility + observational data / expert consensus
+Grade D — Theoretical / anecdotal / "it worked for me"
+```
+
+Every protocol, every hardware recommendation, every software choice gets a grade. You decide your threshold.
+
+## What "reproducible" means
+
+- Docker compose files pinned by digest-able tags
+- Build scripts that produce the same output on any machine
+- CI pipelines that validate the artifact before it ships
+- No "works on my machine" — works on *your* machine because the environment is defined
+
+## What "self-hosted" means
+
+You own the infrastructure. The models run on your GPU. The data lives on your disks. The tunnels dial *out* from your network — no inbound ports, no vendor API keys, no third-party logging.
+
+---
+
+*This page is the anchor for the Manifesto sidebar section. Additional pages will expand on each pillar.*

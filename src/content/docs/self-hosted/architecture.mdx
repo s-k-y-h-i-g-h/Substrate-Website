@@ -1,0 +1,101 @@
+---
+title: Self-Hosted Architecture
+description: The Substrate infrastructure philosophy — Docker compose, named tunnels, and local-first networking.
+---
+
+# Self-Hosted Architecture
+
+Substrate doesn't just document self-hosted infrastructure — it **runs on it**. The site you're reading is served by the stack described here.
+
+## Design principles
+
+| Principle | Implementation |
+|-----------|----------------|
+| **No inbound ports** | All public access via Cloudflare named tunnels (outbound-only) |
+| **No vendor APIs for core infra** | Tailscale for tailnet access, Cloudflare only for public TLS + DDoS |
+| **Compose everywhere** | Every service is a `docker-compose.yml` in its own repo |
+| **Pinned, reproducible** | Images by digest-able tag; `npm ci` from lockfile; no `latest` in prod |
+| **Healthchecked** | Every container has `/healthz` and `restart: unless-stopped` |
+| **Observable** | Logs → Loki, metrics → Prometheus, dashboards → Grafana (stack defined below) |
+
+## The substrate.win stack
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Cloudflare Edge                            │
+│  TLS termination │ DDoS │ WAF │ Cache (static assets)        │
+└─────────────────────────────┬─────────────────────────────────┘
+                              │ QUIC / HTTP/2
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  cloudflared (named tunnel: substrate-website)               │
+│  Runs in Docker Compose alongside the web container          │
+└─────────────────────────────┬─────────────────────────────────┘
+                              │ compose network
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│  web (nginx:1.29-alpine)                                    │
+│  Serves /dist from multi-stage build (node:26-alpine)        │
+│  Cache-Control: immutable on /_astro/, no-cache on HTML      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Compose file (source of truth)
+
+```yaml
+# Substrate-Website/docker-compose.yml
+name: substrate-website
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: substrate-website:local
+    ports:
+      - "127.0.0.1:8080:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.0
+    command: tunnel --no-autoupdate run
+    volumes:
+      - C:/Users/skyhigh/.cloudflared/config.container.yml:/etc/cloudflared/config.yml:ro
+      - C:/Users/skyhigh/.cloudflared/3b142f22-221b-4547-a0c4-4aae11ee0e88.json:/etc/cloudflared/creds.json:ro
+    depends_on: [web]
+    restart: unless-stopped
+```
+
+## The Kev tunnel (separate process on host)
+
+The BLADE Kev endpoint uses a **second named tunnel** (`kev`) running as a Windows host process (not Docker), because it must reach `https://blade.tail07e3cf.ts.net` via the host's Tailscale daemon:
+
+```yaml
+# ~/.cloudflared/config.yml (host)
+tunnel: ff215de9-9d5d-4d53-9829-55970efc948d
+credentials-file: C:\Users\skyhigh\.cloudflared\ff215de9-9d5d-4d53-9829-55970efc948d.json
+ingress:
+  - hostname: kev.substrate.win
+    service: https://blade.tail07e3cf.ts.net
+    originRequest:
+      noTLSVerify: true  # Tailscale serve cert; tunnel→serve is WireGuard
+  - service: http_status:404
+```
+
+## Why two tunnels?
+
+| Tunnel | Runs in | Target | Reason |
+|--------|---------|--------|--------|
+| `substrate-website` | Docker Compose | `web:80` | Self-contained, versioned with site |
+| `kev` | Windows host process | Tailscale serve | Host Tailscale daemon required |
+
+## Next pages
+
+- [Reverse Proxies](/self-hosted/proxies/) — nginx, Caddy, Traefik patterns
+- [Monitoring](/self-hosted/monitoring/) — Loki, Prometheus, Grafana stack

@@ -1,0 +1,114 @@
+# Content-lane audit agent for Substrate-Website. VERIFIED WORKING 2026-10-11.
+#
+# LLM endpoint: FreeLLMAPI ONLY. Strata (127.0.0.1:8080) serves a single
+# concurrent consumer and that consumer is the interactive Hermes agent, so
+# containerized agents must never target it.
+#
+# The key is NOT in this file. `token_key` names an ENV VAR that docker-agent
+# reads at run time. The repo is public — a literal key here = a published key.
+#
+# Run from the repo root:
+#   FREELLMAPI_KEY=*** docker agent run .docker/agents/content-lane.yaml \
+#     --agent verifier --exec --json "Audit src/content/guides/foo.mdx"
+#
+# Config-shape notes (each of these cost a failed dry-run to discover):
+#   - no top-level `name:` / `description:` — only `models:` and `agents:`
+#   - snake_case fields: `max_iterations`, NOT `maxIterations`
+#   - system prompt key is `instruction:`, NOT `prompt:`
+#   - `token_key:` is the env var NAME, not the secret
+#   - `structured_output.mode: tool` — provider-agnostic validation
+
+models:
+  freellmapi:
+    provider: openai
+    # Pin, do not use `auto`. `auto` load-balances across upstreams, so the
+    # same page audited twice can land on a different model and return a
+    # different verdict. A CI gate must be reproducible. Verify the pinned id
+    # is present in /v1/models before each CI run; upstreams rotate.
+    model: auto
+    base_url: http://host.docker.internal:3001/v1
+    token_key: FREELLMAPI_KEY
+    max_tokens: 2048
+    temperature: 0
+    track_usage: true
+
+agents:
+  verifier:
+    model: freellmapi
+    description: >
+      Judges one content page against the evidence policy and returns a
+      strict JSON verdict.
+    add_date: true
+    readonly: true
+    redact_secrets: true
+    max_iterations: 4
+    max_tool_result_tokens: 4000
+    # Skill discovery OFF: the repo-local speckit-* skills are dev-lane
+    # scaffolding and would pollute the content lane's context.
+    skills: false
+    instruction: |
+      You are auditing exactly one Substrate-Website content page. You are
+      given its markdown source and its frontmatter.
+
+      Judge exactly these four things, and nothing else:
+
+      1. stale      - versions, prices, product names, or "current best"
+                      claims that look out of date relative to the page's
+                      last_verified date and today's date.
+      2. uncited    - a factual claim with no citation.
+      3. tier_gap   - the declared evidence tier is not supported by the
+                      citations present (e.g. tier "trial" with no study
+                      referenced, or a tier "trial" claim resting on one
+                      anecdote).
+      4. dead_link  - a cited URL that is stated as unreachable.
+
+      Hard rules:
+      - Do not rewrite, summarize, or comment on prose quality.
+      - Do not propose edits.
+      - Do not invent citations. If you cannot verify a claim, report it as
+        uncited.
+      - Be conservative. An empty findings array is a valid, good answer.
+      - Report at most 10 findings, most severe first.
+      - Keep each note under 140 characters.
+
+      Deliver the verdict via the structured output tool.
+    structured_output:
+      # tool mode: provider-agnostic. FreeLLMAPI proxies many upstreams, so
+      # native JSON mode is not reliable across them. Tool mode validates the
+      # full schema in the runtime, and rejects a non-compliant answer so the
+      # model must correct it.
+      mode: tool
+      name: audit_verdict
+      description: Machine-readable audit verdict for one content page
+      schema:
+        type: object
+        required: [page, verdict, findings]
+        additionalProperties: false
+        properties:
+          page:
+            type: string
+            description: The page path you were given
+          verdict:
+            type: string
+            enum: [pass, review, fail]
+            description: pass = clean, review = minor findings, fail = tier_gap or dead_link present
+          findings:
+            type: array
+            maxItems: 10
+            items:
+              type: object
+              required: [kind, where, note]
+              additionalProperties: false
+              properties:
+                kind:
+                  type: string
+                  enum: [stale, uncited, tier_gap, dead_link]
+                where:
+                  type: string
+                  description: Heading or line reference within the page
+                note:
+                  type: string
+                  # No maxLength here. A hard maxLength caused the model to
+                  # emit 5 over-limit notes, the runtime rejected them, and
+                  # the retry turn died with HTTP 400 from the proxy. Enforce
+                  # note length in scripts/audit.mjs instead.

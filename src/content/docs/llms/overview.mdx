@@ -1,0 +1,53 @@
+---
+title: Local-First LLMs — Overview
+description: Run models on your own hardware. No API keys, no logging, no vendor lock-in.
+---
+
+# Local-First LLMs: Overview
+
+The default way to use LLMs today is API calls to closed providers. That means:
+- Your prompts are logged
+- Your data trains their next model
+- Pricing changes without notice
+- Rate limits gate your workflow
+- The model disappears if the company pivots
+
+**Local-first** means the model weights live on your disk, inference runs on your GPU, and nothing leaves your machine unless *you* choose to send it.
+
+## Why now?
+
+| Year | Development |
+|------|-------------|
+| 2022 | LLaMA leaked — first GPT-class weights in the wild |
+| 2023 | GGML/GGUF quantization — 7B models fit in 8 GB VRAM |
+| 2024 | llama.cpp / vLLM / Ollama — production serving stacks |
+| 2025 | 32B+ models at 4-bit quality on 24 GB cards |
+
+The hardware you already own (or can buy used) is sufficient for serious work.
+
+## The Substrate stack
+
+```
+┌─────────────────────────────────────┐
+│          FreeLLMAPI (API layer)     │
+│  OpenAI-compatible, single-user,    │
+│  model registry, streaming, tools   │
+├─────────────────────────────────────┤
+│           llama.cpp / vLLM          │
+│  Quantized GGUF / AWQ / GPTQ        │
+│  Flash-attn, KV-cache, speculation  │
+├─────────────────────────────────────┤
+│            Your GPU(s)              │
+│  2070 Max-Q (8 GB) → 7B Q4          │
+│  3060 (12 GB)    → 13B Q4 / 7B Q8   │
+│  4070 (12 GB)    → 32B Q4           │
+│  4090 (24 GB)    → 70B Q4 / 32B Q8  │
+└─────────────────────────────────────┘
+```
+
+All of this runs in Docker compose. The tunnel exposes it at `https://llm.substrate.win` (when configured) — or keep it tailnet-private via Tailscale.
+
+## Next pages
+
+- [Hardware Guide](/llms/hardware/) — GPU selection, VRAM math, used-market picks
+- [FreeLLMAPI](/llms/freellmapi/) — API server config, model registry, tool calling

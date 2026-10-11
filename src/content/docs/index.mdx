@@ -1,0 +1,58 @@
+---
+title: Substrate
+description: Evidence-based guides for running LLMs at home, biohacking, and self-hosted infrastructure.
+template: splash
+hero:
+  tagline: Infrastructure for human agency.
+  actions:
+    - text: Read the Manifesto
+      link: /manifesto/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/s-k-y-h-i-g-h/Substrate-Website
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## What is Substrate?
+
+Substrate is a knowledge base for people who want to run their own infrastructure — LLMs, health tracking, home servers — without relying on closed platforms or opaque recommendations.
+
+Everything here is **evidence-graded**, **reproducible**, and **self-hosted**.
+
+<CardGrid stagger>
+  <Card title="Local-First LLMs" icon="cpu">
+    Run models on your own hardware. No API keys, no logging, no vendor lock-in.
+    <br /><br />
+    <a href="/llms/">Browse guides →</a>
+  </Card>
+  <Card title="Biohacking" icon="flask-conical">
+    Supplement protocols, biomarker tracking, and intervention grading — backed by primary literature.
+    <br /><br />
+    <a href="/biohacking/">Browse guides →</a>
+  </Card>
+  <Card title="Self-Hosted Stack" icon="server">
+    Docker compose stacks, reverse proxies, tunnels, and monitoring — all running on your own metal.
+    <br /><br />
+    <a href="/self-hosted/">Browse guides →</a>
+  </Card>
+</CardGrid>
+
+## Why this exists
+
+Most "documentation" in this space is either marketing copy, outdated tutorials, or uncritical product roundups. Substrate is different:
+
+- **No affiliate links.** No sponsored placements. No hidden incentives.
+- **Graded evidence.** Every claim cites its source; every recommendation shows its confidence.
+- **Built to run.** Not "how to think about X" — actual compose files, configs, and validation steps.
+- **Open source.** The site, the tooling, the data — all MIT/Apache-2.0. Fork it, audit it, improve it.
+
+## Status
+
+🚧 **Early construction.** Core infrastructure is live (named tunnel, Docker stack, CI pipeline). Content collections are being authored now.
+
+---
+
+*Substrate is a project by [George Zankevich](https://github.com/s-k-y-h-i-g-h). Source at [github.com/s-k-y-h-i-g-h/Substrate-Website](https://github.com/s-k-y-h-i-g-h/Substrate-Website).*

@@ -1,0 +1,26 @@
+# Excluded from the Docker build context.
+#
+# node_modules is the important one: the image runs `npm ci` from the
+# lockfile, so shipping the host's node_modules would bloat the context by
+# hundreds of MB and mask a broken dependency install.
+
+node_modules/
+dist/
+.astro/
+.git/
+.gitignore
+
+# Dev-lane scaffolding: not needed to build the site.
+.specify/
+.hermes/
+.agents/
+.github/
+AGENTS.md
+CLAUDE.md
+
+# Secrets and local state must never enter an image layer.
+.env
+.env.*
+*.token
+*.pem
+.docker/

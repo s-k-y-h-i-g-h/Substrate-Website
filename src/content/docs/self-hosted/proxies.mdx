@@ -1,0 +1,135 @@
+---
+title: Reverse Proxy Patterns
+description: nginx, Caddy, and Traefik configurations for self-hosted services behind tunnels.
+---
+
+# Reverse Proxy Patterns
+
+Every self-hosted service needs a reverse proxy for TLS termination, path routing, and header injection. Substrate standardizes on three patterns.
+
+## 1. nginx (Substrate-Website default)
+
+```nginx
+# nginx.conf — served in container at /etc/nginx/conf.d/default.conf
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Hashed assets — cache forever
+    location /_astro/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    # HTML — always revalidate
+    location / {
+        add_header Cache-Control "no-cache";
+        try_files $uri $uri/ $uri.html =404;
+    }
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location ~ /\. { deny all; }
+}
+```
+
+**When to use:** Static sites, simple path routing, maximum control.
+
+## 2. Caddy (automatic HTTPS via ACME)
+
+```caddy
+# Caddyfile — for services that need public HTTPS without Cloudflare
+{
+    admin off
+    email you@example.com
+}
+
+service.example.com {
+    reverse_proxy app:8080
+
+    header {
+        # Security headers
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Compression
+    encode zstd gzip
+}
+```
+
+**When to use:** Services exposed directly to internet (no tunnel), need auto-TLS.
+
+## 3. Traefik (dynamic config, Docker labels)
+
+```yaml
+# docker-compose.yml snippet
+services:
+  traefik:
+    image: traefik:v3.2
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.le.acme.email=you@example.com"
+      - "--certificatesresolvers.le.acme.tlschallenge=true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"  # dashboard (protect!)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-data:/letsencrypt
+    restart: unless-stopped
+
+  whoami:
+    image: traefik/whoami
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`whoami.example.com`)"
+      - "traefik.http.routers.whoami.entrypoints=websecure"
+      - "traefik.http.routers.whoami.tls.certresolver=le"
+    restart: unless-stopped
+```
+
+**When to use:** Many services, dynamic discovery, Let's Encrypt automation.
+
+## Substrate's choice: nginx + Cloudflare Tunnel
+
+We don't run a proxy *in front of* the tunnel — the tunnel **is** the edge. Cloudflare handles:
+- TLS termination (certs auto-renewed)
+- DDoS protection
+- WAF rules
+- Edge caching (`Cache-Control: immutable` on `/_astro/`)
+- IPv6, HTTP/3, Brotli/Zstd
+
+The container only sees HTTP on port 80. No certs, no ACME, no port 443 in compose.
+
+## Header forwarding (when you need client info)
+
+```nginx
+# In nginx.conf, if origin needs real IP
+location / {
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_pass http://app:8080;
+}
+```
+
+Cloudflare injects `CF-Connecting-IP`, `CF-Ray`, `CF-IPCountry` — available at origin via `X-Forwarded-For` chain.
+
+---
+
+*All configs here are tested in the Substrate stack. Copy, adapt, pin versions.*

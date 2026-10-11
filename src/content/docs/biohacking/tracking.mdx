@@ -1,0 +1,110 @@
+---
+title: Biomarker Tracking Stack
+description: Self-hosted tools for tracking biomarkers, supplements, and interventions.
+---
+
+# Biomarker Tracking Stack
+
+The Substrate tracking stack is local-first, open-source, and designed for longitudinal n=1 data.
+
+## Architecture
+
+```
+┌──────────────────────────────────────┐
+│         SelfPlusPlus (web UI)        │
+│  React + TypeScript, PWA, offline    │
+│  Charts, correlations, export CSV    │
+├──────────────────────────────────────┤
+│         biohack2 (Rust CLI)          │
+│  Deterministic protocol engine       │
+│  Supplement scheduling, interactions │
+│  Data import/export (JSON, CSV)      │
+├──────────────────────────────────────┤
+│         SQLite / DuckDB              │
+│  Append-only event log               │
+│  Time-series optimized               │
+└──────────────────────────────────────┘
+```
+
+## SelfPlusPlus (web dashboard)
+
+```bash
+# In Substrate-Website repo (separate project)
+cd SelfPlusPlus
+docker compose up -d
+# → http://localhost:3000 (or tunnel to tracking.substrate.win)
+```
+
+Features:
+- Supplement log with dose/timing adherence
+- Biomarker entry (blood work, wearables, subjective)
+- Correlation explorer (supplement × biomarker × time)
+- Export to CSV for R/Python analysis
+- PWA — works offline on phone
+
+## biohack2 (CLI)
+
+```bash
+# Install
+cargo install biohack2
+
+# Load a protocol
+biohack protocol load magnesium-sleep
+
+# Check interactions before adding
+biohack interactions check --add creatine
+
+# Daily schedule
+biohack schedule today
+
+# Log a dose
+biohack log magnesium-glycinate --dose 400 --unit mg
+
+# Export for analysis
+biohack export --format csv --since 30d > tracking.csv
+```
+
+## Data model (shared)
+
+```rust
+// biohack2 core types
+pub struct SupplementEvent {
+    pub timestamp: DateTime<Utc>,
+    pub compound: String,
+    pub dose: f64,
+    pub unit: Unit,
+    pub route: Route,
+    pub protocol_id: Option<String>,
+}
+
+pub struct BiomarkerEvent {
+    pub timestamp: DateTime<Utc>,
+    pub marker: String,
+    pub value: f64,
+    pub unit: String,
+    pub source: Source,  // BloodTest, Wearable, Subjective
+}
+```
+
+Both tools read/write the same SQLite schema — no lock-in.
+
+## Wearable integration
+
+- **Oura**: OAuth sync → SQLite (heart rate, HRV, sleep stages, temperature)
+- **WHOOP**: Unofficial API → CSV import
+- **Garmin**: Health API → CSV/FIT import
+- **Apple Health**: `healthkit-to-sqlite` → DuckDB
+
+## Deploy with tunnel
+
+```yaml
+# cloudflared config.yml
+ingress:
+  - hostname: tracking.substrate.win
+    service: http://host.docker.internal:3000
+  - service: http_status:404
+```
+
+---
+
+*SelfPlusPlus and biohack2 are MIT-licensed. Source: [github.com/s-k-y-h-i-g-h/biohack2](https://github.com/s-k-y-h-i-g-h/biohack2) · [github.com/s-k-y-h-i-g-h/SelfPlusPlus](https://github.com/s-k-y-h-i-g-h/SelfPlusPlus)*

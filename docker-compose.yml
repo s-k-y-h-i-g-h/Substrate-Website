@@ -1,0 +1,43 @@
+name: substrate-website
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: substrate-website:local
+    # Bound to localhost only. The public path is the cloudflared tunnel;
+    # nothing here needs to be reachable from the internet or the LAN.
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    labels:
+      org.opencontainers.image.title: "Substrate-Website"
+      org.opencontainers.image.description: "Starlight docs site, static build served by nginx"
+
+  tunnel:
+    image: cloudflare/cloudflared:2026.9.0
+    command: tunnel --no-autoupdate run
+    # Read-only mounts: the tunnel config and the tunnel's credentials JSON.
+    # Both live outside the repo and are never committed.
+    volumes:
+      - type: bind
+        source: C:/Users/skyhigh/.cloudflared/config.container.yml
+        target: /etc/cloudflared/config.yml
+        read_only: true
+      - type: bind
+        source: C:/Users/skyhigh/.cloudflared/3b142f22-221b-4547-a0c4-4aae11ee0e88.json
+        target: /etc/cloudflared/3b142f22-221b-4547-a0c4-4aae11ee0e88.json
+        read_only: true
+    depends_on:
+      - web
+    restart: unless-stopped
+    labels:
+      org.opencontainers.image.title: "Substrate-Website tunnel"
+      org.opencontainers.image.description: "Cloudflare Tunnel connector for substrate.win"

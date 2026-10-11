@@ -1,0 +1,238 @@
+---
+title: Monitoring Stack
+description: Loki, Prometheus, Grafana — the Substrate observability stack for self-hosted services.
+---
+
+# Monitoring Stack
+
+Every service in Substrate exports metrics and logs. The stack collects, stores, and visualizes them — all self-hosted, all in Docker compose.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Grafana (dashboards)                      │
+│  http://grafana.substrate.win (or tailnet)                      │
+└────────────────────────────────┬────────────────────────────────┘
+                                 │
+        ┌────────────────────────┼────────────────────────┐
+        ▼                        ▼                        ▼
+┌───────────────┐      ┌─────────────────┐      ┌───────────────┐
+│    Loki       │      │   Prometheus    │      │   Tempo       │
+│  (logs)       │      │  (metrics)      │      │  (traces)     │
+│  :3100        │      │  :9090          │      │  :3200        │
+└───────┬───────┘      └────────┬────────┘      └───────┬───────┘
+        │                       │                       │
+        └───────────────────────┼───────────────────────┘
+                                ▼
+        ┌─────────────────────────────────────────────┐
+        │           Promtail / Node Exporter          │
+        │         (daemonset on each host)            │
+        └─────────────────────────────────────────────┘
+```
+
+## Compose stack
+
+```yaml
+# monitoring/docker-compose.yml
+name: monitoring
+
+services:
+  loki:
+    image: grafana/loki:3.1.0
+    command: -config.file=/etc/loki/local-config.yaml
+    ports: ["3100:3100"]
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    command: -config.file=/etc/tempo.yaml
+    ports: ["3200:3200", "4317:4317"]  # OTLP gRPC
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports: ["3000:3000"]
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD_FILE=/run/secrets/grafana_password
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - ./grafana-datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./grafana-dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    secrets:
+      - grafana_password
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.1.0
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.0
+    command:
+      - "--path.rootfs=/host"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    ports: ["9100:9100"]
+    volumes:
+      - /:/host:ro,rslave
+    restart: unless-stopped
+    pid: host
+    network_mode: host
+
+volumes:
+  loki-data:
+  prometheus-data:
+  tempo-data:
+  grafana-data:
+
+secrets:
+  grafana_password:
+    file: ./secrets/grafana_password.txt
+```
+
+## Prometheus scrape config (key parts)
+
+```yaml
+# prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  - job_name: 'docker'
+    static_configs:
+      - targets: ['host.docker.internal:9323']  # cAdvisor if running
+
+  - job_name: 'substrate-services'
+    static_configs:
+      - targets:
+        - 'web:80'           # Substrate-Website healthz
+        - 'freellmapi:3001'  # FreeLLMAPI /health
+        - 'kev:8009'         # BLADE Kev (if exposed)
+    metrics_path: '/healthz'  # or /metrics for Prometheus-native
+```
+
+## Loki + Promtail (structured logs)
+
+```yaml
+# promtail-config.yml
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 10s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'stream'
+
+  - job_name: substrate-web
+    static_configs:
+      - targets: ['localhost']
+        labels:
+          job: 'substrate-web'
+          __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      - json:
+          expressions:
+            container: container_name
+            log: log
+      - labels:
+          container:
+```
+
+## Grafana datasource provisioning
+
+```yaml
+# grafana-datasources.yaml
+apiVersion: 1
+datasources:
+  - name: Loki
+    type: loki
+    url: http://loki:3100
+    access: proxy
+    isDefault: true
+
+  - name: Prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    access: proxy
+
+  - name: Tempo
+    type: tempo
+    url: http://tempo:3200
+    access: proxy
+```
+
+## Dashboards to import (Grafana.com IDs)
+
+| ID | Name | Why |
+|----|------|-----|
+| 1860 | Node Exporter Full | Host hardware (CPU, RAM, disk, net) |
+| 12600 | Docker Container Monitoring | Per-container CPU, RAM, net, I/O |
+| 13639 | Loki Logs Overview | Log volume, errors by level, top labels |
+| 15779 | Prometheus 2.0 Overview | Prometheus itself (scrape duration, WAL, etc.) |
+
+## Tunnel exposure
+
+```yaml
+# cloudflared config.yml
+ingress:
+  - hostname: grafana.substrate.win
+    service: http://host.docker.internal:3000
+  - hostname: prometheus.substrate.win
+    service: http://host.docker.internal:9090
+  - service: http_status:404
+```
+
+**Protect Grafana** — put it behind Cloudflare Access (Zero Trust) or Tailscale-only. Never expose unauthenticated.
+
+---
+
+*Stack versions pinned to Oct 2026. Update cycle: quarterly, with changelog review.*
